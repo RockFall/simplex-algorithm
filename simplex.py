@@ -1,6 +1,29 @@
 from fractions import Fraction
 import numpy as np
 
+class SimplexSolver:
+    def __init__(self, c, A, b=[]):
+        self.A = np.array(A)
+
+        if len(b) == 0:
+            # we must get b from last col of A
+            b = A[:,-1]
+            self.Ab = np.copy(self.A)
+            self.A = np.delete(self.A, -1, 1)
+        else:
+            self.b = np.array(b)
+            # only catenating b as last column of A
+            self.Ab = np.hstack((A,b[:,None]))
+
+
+    def solve(self):
+         # it creates the self.tableau variable
+        self._build_initial_tableau()
+
+    def _build_initial_tableau(self):
+        pass
+
+
 # Input
 n = 2 # nº Restrições
 m = 2 # nº Variáveis
@@ -24,7 +47,7 @@ c = np.array(c_input)
 # input e depois com tempo adicionamos as restrições
 # de forma explícita
 
-x = get_solution()
+
 
 def get_solution():
     return np.array()
@@ -36,12 +59,9 @@ def is_optimal():
 
 
 def SimplexSolve(c, A, b):
+    tableau = build_initial_tableau()
 
-    # Assert shapes are OK
-    assert A.shape[0] == b.shape[0], 'first dims of A and b must match, check input!'
-    assert A.shape[1] == c.shape[0], 'second dim of A must match first dim of c, check input'
-
-    # ensure A is full rank, drop redundant rows if not
+    x = get_solution()
 
 
 
