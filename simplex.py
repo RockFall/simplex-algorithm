@@ -25,7 +25,7 @@ class SimplexSolver:
 
          # it creates the self.tableau variable
         self._build_initial_tableau()
-        #self._print_tableau() # !: DEBUG ONLY
+        self._print_tableau() # !: DEBUG ONLY
 
         # starts solving
         while self._is_optimal() == False:
@@ -37,7 +37,7 @@ class SimplexSolver:
             pivot = self._find_next_pivot()
             self._do_pivot(pivot)
 
-            #self._print_tableau() # !: DEBUG ONLY
+            self._print_tableau() # !: DEBUG ONLY
             self._debug_ite_count += 1 # !: DEBUG ONLY
 
         self.optimal_obj_value = self.tableau[0,-1]
