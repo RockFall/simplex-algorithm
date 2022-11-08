@@ -2,9 +2,11 @@ import numpy as np
 from tabulate import tabulate
 
 class SimplexSolver:
-    def __init__(self, c, A, b=[]):
+    def __init__(self, c, A, b=[], debug=False):
         self.A = np.array(A)
         self.c = np.array(c)
+        self.debug = debug
+        self._is_auxiliar = False
 
         if len(b) == 0:
             # we must get b from last col of A
@@ -27,6 +29,10 @@ class SimplexSolver:
         self._build_initial_tableau()
         self._print_tableau() # !: DEBUG ONLY
 
+        if self._has_negative_b():
+            self._make_auxiliar()
+            self._print_tableau() # !: DEBUG ONLY
+
         # starts solving
         while self._is_optimal() == False:
             #if self._is_unlimited_all():
@@ -41,12 +47,16 @@ class SimplexSolver:
             self._debug_ite_count += 1 # !: DEBUG ONLY
 
         self.optimal_obj_value = self.tableau[0,-1]
-
+        np.seterr(divide='ignore', invalid='ignore')
         if self.optimal_obj_value >= 0:
             self.type = "otima"
             z = np.zeros(self.tableau.shape[1])
             z[self.identity_columns] = self.tableau[1:, -1]
-            self.optimal_solution = z[self.numRestr:-(1+self.numRestr)]
+
+            solution_rhs_offset = 1+self.numRestr
+            if self._is_auxiliar:
+                solution_rhs_offset += self.numRestr
+            self.optimal_solution = z[self.numRestr:-(solution_rhs_offset)]
         else:
             self.type = "inviavel"
 
@@ -69,6 +79,32 @@ class SimplexSolver:
         self.identity_columns = np.arange(tableau.shape[1]-(restr_count+1), tableau.shape[1]-1)
         self.tableau = tableau
 
+    def _has_negative_b(self):
+        return np.any(self.tableau[:, -1] < 0)
+
+    def _make_auxiliar(self):
+        self._is_auxiliar = True
+
+        # invert every row with negative b
+        self.tableau[self.tableau[:, -1] < 0] *= -1
+
+        # creates the auxiliar LP part
+        self.tableau[0] = 0
+        new_block = np.identity(self.numRestr)
+        new_block = np.vstack((np.full(self.numRestr, 1), new_block))
+        new_block = np.column_stack((new_block, self.tableau[:, -1]))
+
+        # apply it to internal tableau
+        self.tableau = np.hstack((self.tableau[:,0:-1], new_block))
+
+        # make it canonical
+        self._print_tableau() # !: DEBUG ONLY
+        column_offset = self.numRestr*2 + self.numVars
+        for identity_collumn in range(self.numRestr):
+            pivot = [identity_collumn+1, column_offset+identity_collumn]
+            self._do_pivot(pivot)
+            self._print_tableau() # !: DEBUG ONLY
+
     def _is_optimal(self):
         has_negative = np.any((self.tableau[0][self.numRestr:-1] < 0))
         return not has_negative
@@ -81,22 +117,17 @@ class SimplexSolver:
 
     def _find_next_pivot(self):
         # picks the index of the first negative entry on the top
-        candidates = self._get_cadidates()
-        for candidate in candidates:
-            column_idx = candidate
-            # select the index of the min of each (b_i / A_i)
-            np.seterr(divide='ignore')
-            possibilities = self.tableau[1:,-1]/self.tableau[1:,column_idx]
-            if np.all((possibilities < 0)|(possibilities == np.inf)):
-                continue
-            row_idx = np.argmin(possibilities) + 1
-            return [row_idx, column_idx]
+        candidate = self._get_cadidates()[0]
+        column_idx = candidate
+        # select the index of the min of each (b_i / A_i)
+        possibilities = np.divide(self.tableau[1:,-1], self.tableau[1:,column_idx])
+        if np.all((possibilities < 0)|(possibilities == np.inf)):
+            # if we get here then all possibilities lead to impossible choices
+            assert(False)
+        row_idx = np.nanargmin(possibilities) + 1
+        return [row_idx, column_idx]
 
-        # if we get here then all candidates lead to impossible choices
-
-
-
-    def _is_unlimited(self, idx):
+    def _is_unlimited_by_idx(self, idx):
         all_negative = (self.tableau[1:, idx]).all(axis=0)
         return all_negative
 
@@ -116,30 +147,24 @@ class SimplexSolver:
         self.identity_columns[pivot[0]-1] = pivot[1]
 
     def _print_tableau(self): # !: DEBUG ONLY
-        print("Iteration: " + str(self._debug_ite_count))
-        print(tabulate(self.tableau, headers='firstrow', stralign='center', tablefmt='fancy_grid'))
-        print("\n\n")
+        if self.debug:
+            print("Iteration: " + str(self._debug_ite_count))
+            print(tabulate(self.tableau, headers='firstrow', stralign='center', tablefmt='fancy_grid'))
+            print("\n\n")
 
-#
-#   _________________________________________________
-# [ 0.     0.     0.     1.     9.124 -1.     5.     0.   ]
-# ------------------------------------------------
-# | 1.000 0.000 0.000 || 1.523 2.897 2.329 | 9.121
+    def _to_string(self, array):
+        final = ""
+        for num in array:
+            final += str(int(num)) + " "
+        return final[:-1]
 
     def _print_results(self):
         print(self.type)
         if self.type == "otima":
-            print(self.optimal_obj_value)
-            # Print arrays as: [1. 1. 1.] -> 1 1 1
-            solution = ""
-            for num in self.optimal_solution:
-                solution += str(int(num)) + " "
-            print(solution[:-1])
-            solution = ""
-            for num in self.tableau[0][:self.numRestr]:
-                solution += str(int(num)) + " "
-            print(solution[:-1])
+            print(int(self.optimal_obj_value))
+            print(self._to_string(self.optimal_solution))
+            print(self._to_string(self.tableau[0][:self.numRestr])) # certificade
         elif self.type == "ilimitada":
             print("certificado")
         elif self.type == "inviavel":
-            print(self.tableau[0][:self.numRestr])
+            print(self._to_string(self.tableau[0][:self.numRestr])) # certificade
