@@ -11,54 +11,84 @@ class SimplexSolver:
         if len(b) == 0:
             # we must get b from last col of A
             b = A[:,-1]
-            self.Ab = np.copy(self.A)
             self.A = np.delete(self.A, -1, 1)
         else:
             self.b = np.array(b)
-            # only catenating b as last column of A
-            self.Ab = np.column_stack((self.A,self.b))
+
+        self._solve_conflicts()
 
         self.numVars = self.c.size
         self.numRestr = self.A.shape[0]
 
+    def _solve_conflicts(self):
+        # checks if some row is the negative of other
+        Ab = np.column_stack((self.A,self.b))
+        has_opposites = []
+        for num in np.unique(Ab[:,-1]):
+            if (num not in has_opposites and (num*-1) not in has_opposites) and np.any(Ab[:,-1] == np.negative(num)):
+                has_opposites.append(num)
+
+        for num in has_opposites:
+            for [idx_row_of_num] in np.transpose(np.where(Ab[:,-1] == num)):
+                for [idx_row_with_opp] in np.transpose(np.where(Ab[:,-1] == np.negative(num))):
+                    if np.array_equal(np.abs(Ab[idx_row_of_num]), np.abs(Ab[idx_row_with_opp])):
+                        self.A = np.delete(self.A, idx_row_with_opp, 0)
+                        self.b = np.delete(self.b, idx_row_with_opp)
+
 
     def solve(self):
+        np.seterr(divide='ignore', invalid='ignore')
         self._debug_ite_count = 0 # !: DEBUG ONLY
 
          # it creates the self.tableau variable
         self._build_initial_tableau()
+        print("Criação do Tableau inicial")
         self._print_tableau() # !: DEBUG ONLY
 
         if self._has_negative_b():
             self._make_auxiliar()
+            print("PL Auxiliar Pronta")
             self._print_tableau() # !: DEBUG ONLY
 
         # starts solving
-        while self._is_optimal() == False:
-            #if self._is_unlimited_all():
-            #    self.type = "ilimitada"
-            #    self._print_results()
-            #    return False
+        while True:
+            while self._is_optimal() == False:
+                #if self._is_unlimited_all():
+                #    self.type = "ilimitada"
+                #    self._print_results()
+                #    return False
 
-            pivot = self._find_next_pivot()
-            self._do_pivot(pivot)
+                pivot = self._find_next_pivot()
+                self._do_pivot(pivot)
 
-            self._print_tableau() # !: DEBUG ONLY
-            self._debug_ite_count += 1 # !: DEBUG ONLY
+                print("Pivot: row[" + str(pivot[0]) + "] column[" + str(pivot[1]) + "]")
+                self._print_tableau() # !: DEBUG ONLY
+                self._debug_ite_count += 1 # !: DEBUG ONLY
 
-        self.optimal_obj_value = self.tableau[0,-1]
-        np.seterr(divide='ignore', invalid='ignore')
-        if self.optimal_obj_value >= 0:
-            self.type = "otima"
-            z = np.zeros(self.tableau.shape[1])
-            z[self.identity_columns] = self.tableau[1:, -1]
+            self.optimal_obj_value = self.tableau[0,-1]
 
-            solution_rhs_offset = 1+self.numRestr
             if self._is_auxiliar:
-                solution_rhs_offset += self.numRestr
-            self.optimal_solution = z[self.numRestr:-(solution_rhs_offset)]
-        else:
-            self.type = "inviavel"
+                # auxiliar LP
+                if self.optimal_obj_value == 0:
+                    # original is viable
+                    self._end_auxiliar()
+                    self._is_auxiliar = False
+                    continue # repeat simplex on original
+                else:
+                    # unfeasible
+                    self.type = "inviavel"
+                    break
+            else:
+                # not auxiliar -> don't repeat the simplex
+                if self.optimal_obj_value >= 0:
+                    self.type = "otima"
+                    z = np.zeros(self.tableau.shape[1])
+                    z[self.identity_columns] = self.tableau[1:, -1]
+                    self.optimal_solution = z[self.numRestr:(self.numRestr+self.numVars)]
+                    break
+                else:
+                    self.type = "inviavel"
+                    break
 
         self._print_results()
         return True
@@ -88,6 +118,9 @@ class SimplexSolver:
         # invert every row with negative b
         self.tableau[self.tableau[:, -1] < 0] *= -1
 
+        # saves original objective function
+        self.c = np.copy(self.tableau[0])
+
         # creates the auxiliar LP part
         self.tableau[0] = 0
         new_block = np.identity(self.numRestr)
@@ -98,11 +131,25 @@ class SimplexSolver:
         self.tableau = np.hstack((self.tableau[:,0:-1], new_block))
 
         # make it canonical
+        print("PL Auxiliar")
         self._print_tableau() # !: DEBUG ONLY
         column_offset = self.numRestr*2 + self.numVars
         for identity_collumn in range(self.numRestr):
             pivot = [identity_collumn+1, column_offset+identity_collumn]
             self._do_pivot(pivot)
+            print("Pivot na Auxiliar: " + str(identity_collumn))
+            self._print_tableau() # !: DEBUG ONLY
+
+    def _end_auxiliar(self):
+        # original 'c' back to top
+        self.tableau[0] = np.concatenate((self.c, np.zeros(self.numRestr)))
+        print("Voltando a função objetivo original")
+        self._print_tableau() # !: DEBUG ONLY
+
+        for k, identity_collumn in enumerate(self.identity_columns):
+            pivot = [k+1, identity_collumn]
+            self._do_pivot(pivot)
+            print("Pivot Pós-Auxiliar: " + str(identity_collumn))
             self._print_tableau() # !: DEBUG ONLY
 
     def _is_optimal(self):
@@ -124,6 +171,8 @@ class SimplexSolver:
         if np.all((possibilities < 0)|(possibilities == np.inf)):
             # if we get here then all possibilities lead to impossible choices
             assert(False)
+
+        possibilities[np.signbit(possibilities)] = np.nan
         row_idx = np.nanargmin(possibilities) + 1
         return [row_idx, column_idx]
 
