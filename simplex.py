@@ -1,5 +1,6 @@
 import numpy as np
 from tabulate import tabulate
+from fractions import Fraction
 
 class SimplexSolver:
     def __init__(self, c, A, b=[], debug=False):
@@ -15,6 +16,7 @@ class SimplexSolver:
         else:
             self.b = np.array(b)
 
+        self._excluded_restr_count = 0
         self._solve_conflicts()
 
         self.numVars = self.c.size
@@ -25,13 +27,14 @@ class SimplexSolver:
         Ab = np.column_stack((self.A,self.b))
         has_opposites = []
         for num in np.unique(Ab[:,-1]):
-            if (num not in has_opposites and (num*-1) not in has_opposites) and np.any(Ab[:,-1] == np.negative(num)):
-                has_opposites.append(num)
+            if (num not in has_opposites and (np.negative(num)) not in has_opposites) and np.any(Ab[:,-1] == np.negative(num)):
+                has_opposites.append(np.abs(num))
 
         for num in has_opposites:
             for [idx_row_of_num] in np.transpose(np.where(Ab[:,-1] == num)):
                 for [idx_row_with_opp] in np.transpose(np.where(Ab[:,-1] == np.negative(num))):
                     if np.array_equal(np.abs(Ab[idx_row_of_num]), np.abs(Ab[idx_row_with_opp])):
+                        self._excluded_restr_count += 1
                         self.A = np.delete(self.A, idx_row_with_opp, 0)
                         self.b = np.delete(self.b, idx_row_with_opp)
 
@@ -42,8 +45,9 @@ class SimplexSolver:
 
          # it creates the self.tableau variable
         self._build_initial_tableau()
-        print("Criação do Tableau inicial")
-        self._print_tableau() # !: DEBUG ONLY
+        if self.debug: # !: DEBUG ONLY
+            print("Criação do Tableau inicial")
+            self._print_tableau() # !: DEBUG ONLY
 
         if self._has_negative_b():
             self._make_auxiliar()
@@ -53,15 +57,16 @@ class SimplexSolver:
         # starts solving
         while True:
             while self._is_optimal() == False:
-                #if self._is_unlimited_all():
-                #    self.type = "ilimitada"
-                #    self._print_results()
-                #    return False
+                if self._is_unlimited_all():
+                    self.type = "ilimitada"
+                    self._print_results()
+                    return True
 
                 pivot = self._find_next_pivot()
                 self._do_pivot(pivot)
 
-                print("Pivot: row[" + str(pivot[0]) + "] column[" + str(pivot[1]) + "]")
+                if self.debug: # !: DEBUG ONLY
+                    print("Pivot: row[" + str(pivot[0]) + "] column[" + str(pivot[1]) + "]")
                 self._print_tableau() # !: DEBUG ONLY
                 self._debug_ite_count += 1 # !: DEBUG ONLY
 
@@ -131,26 +136,30 @@ class SimplexSolver:
         self.tableau = np.hstack((self.tableau[:,0:-1], new_block))
 
         # make it canonical
-        print("PL Auxiliar")
-        self._print_tableau() # !: DEBUG ONLY
+        if self.debug: # !: DEBUG ONLY
+            print("PL Auxiliar")
+            self._print_tableau() # !: DEBUG ONLY
         column_offset = self.numRestr*2 + self.numVars
         for identity_collumn in range(self.numRestr):
             pivot = [identity_collumn+1, column_offset+identity_collumn]
             self._do_pivot(pivot)
-            print("Pivot na Auxiliar: " + str(identity_collumn))
-            self._print_tableau() # !: DEBUG ONLY
+            if self.debug: # !: DEBUG ONLY
+                print("Pivot na Auxiliar: " + str(identity_collumn))
+                self._print_tableau() # !: DEBUG ONLY
 
     def _end_auxiliar(self):
         # original 'c' back to top
         self.tableau[0] = np.concatenate((self.c, np.zeros(self.numRestr)))
-        print("Voltando a função objetivo original")
-        self._print_tableau() # !: DEBUG ONLY
+        if self.debug: # !: DEBUG ONLY
+            print("Voltando a função objetivo original")
+            self._print_tableau() # !: DEBUG ONLY
 
         for k, identity_collumn in enumerate(self.identity_columns):
             pivot = [k+1, identity_collumn]
             self._do_pivot(pivot)
-            print("Pivot Pós-Auxiliar: " + str(identity_collumn))
-            self._print_tableau() # !: DEBUG ONLY
+            if self.debug: # !: DEBUG ONLY
+                print("Pivot Pós-Auxiliar: " + str(identity_collumn))
+                self._print_tableau() # !: DEBUG ONLY
 
     def _is_optimal(self):
         has_negative = np.any((self.tableau[0][self.numRestr:-1] < 0))
@@ -198,7 +207,7 @@ class SimplexSolver:
     def _print_tableau(self): # !: DEBUG ONLY
         if self.debug:
             print("Iteration: " + str(self._debug_ite_count))
-            print(tabulate(self.tableau, headers='firstrow', stralign='center', tablefmt='fancy_grid'))
+            print(tabulate(np.around(self.tableau, 2), headers='firstrow', stralign='center', tablefmt='fancy_grid'))
             print("\n\n")
 
     def _to_string(self, array):
@@ -212,8 +221,8 @@ class SimplexSolver:
         if self.type == "otima":
             print(int(self.optimal_obj_value))
             print(self._to_string(self.optimal_solution))
-            print(self._to_string(self.tableau[0][:self.numRestr])) # certificade
+            print(self._to_string(np.concatenate((self.tableau[0][:self.numRestr], np.zeros(self._excluded_restr_count))))) # certificade
         elif self.type == "ilimitada":
             print("certificado")
         elif self.type == "inviavel":
-            print(self._to_string(self.tableau[0][:self.numRestr])) # certificade
+            print(self._to_string(np.concatenate((self.tableau[0][:self.numRestr], np.zeros(self._excluded_restr_count))))) # certificade
