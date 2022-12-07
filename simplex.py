@@ -8,6 +8,7 @@ class SimplexSolver:
         self.c = np.array(c)
         self.debug = debug
         self._is_auxiliar = False
+        self.eps = 0.0000000001
 
         if len(b) == 0:
             # we must get b from last col of A
@@ -30,9 +31,15 @@ class SimplexSolver:
             if (num not in has_opposites and (np.negative(num)) not in has_opposites) and np.any(Ab[:,-1] == np.negative(num)):
                 has_opposites.append(np.abs(num))
 
+        # For each value on 'b' that has an opposite on some other row,
+        # checks if those rows are the absolute opposite of each other
+        #
+        # Slow only if most of restrictions have the same value on 'b'
         for num in has_opposites:
             for [idx_row_of_num] in np.transpose(np.where(Ab[:,-1] == num)):
                 for [idx_row_with_opp] in np.transpose(np.where(Ab[:,-1] == np.negative(num))):
+                    if idx_row_of_num == idx_row_with_opp:
+                        continue
                     if np.array_equal(np.abs(Ab[idx_row_of_num]), np.abs(Ab[idx_row_with_opp])):
                         self._excluded_restr_count += 1
                         self.A = np.delete(self.A, idx_row_with_opp, 0)
@@ -45,30 +52,38 @@ class SimplexSolver:
 
          # it creates the self.tableau variable
         self._build_initial_tableau()
-        if self.debug: # !: DEBUG ONLY
-            print("Criação do Tableau inicial")
-            self._print_tableau() # !: DEBUG ONLY
+
+        if self.debug:                              # !: DEBUG ONLY
+            print("Criação do Tableau inicial")     # !:
+            self._print_tableau()                   # !: DEBUG ONLY
 
         if self._has_negative_b():
             self._make_auxiliar()
-            print("PL Auxiliar Pronta")
-            self._print_tableau() # !: DEBUG ONLY
+
+            if self.debug:                  # !: DEBUG ONLY
+                print("PL Auxiliar Pronta") # !:
+                self._print_tableau()       # !: DEBUG ONLY
 
         # starts solving
         while True:
             while self._is_optimal() == False:
                 if self._is_unlimited_all():
                     self.type = "ilimitada"
+                    self._find_optimal_solution()
                     self._print_results()
                     return True
 
                 pivot = self._find_next_pivot()
                 self._do_pivot(pivot)
 
-                if self.debug: # !: DEBUG ONLY
-                    print("Pivot: row[" + str(pivot[0]) + "] column[" + str(pivot[1]) + "]")
-                self._print_tableau() # !: DEBUG ONLY
-                self._debug_ite_count += 1 # !: DEBUG ONLY
+                if self.debug:              # !: DEBUG ONLY
+                    print("Pivot: row[" + str(pivot[0]) + "] column[" + str(pivot[1]) + "]") # !: DEBUG ONLY
+                    self._print_tableau()       # !: DEBUG ONLY
+                    self._debug_ite_count += 1  # !: DEBUG ONLY
+
+                # correcting floating point errors
+                self.tableau[np.abs(self.tableau) < self.eps] = 0
+
 
             self.optimal_obj_value = self.tableau[0,-1]
 
@@ -87,9 +102,7 @@ class SimplexSolver:
                 # not auxiliar -> don't repeat the simplex
                 if self.optimal_obj_value >= 0:
                     self.type = "otima"
-                    z = np.zeros(self.tableau.shape[1])
-                    z[self.identity_columns] = self.tableau[1:, -1]
-                    self.optimal_solution = z[self.numRestr:(self.numRestr+self.numVars)]
+                    self._find_optimal_solution()
                     break
                 else:
                     self.type = "inviavel"
@@ -113,6 +126,11 @@ class SimplexSolver:
 
         self.identity_columns = np.arange(tableau.shape[1]-(restr_count+1), tableau.shape[1]-1)
         self.tableau = tableau
+
+    def _find_optimal_solution(self):
+        z = np.zeros(self.tableau.shape[1])
+        z[self.identity_columns] = self.tableau[1:, -1]
+        self.optimal_solution = z[self.numRestr:(self.numRestr+self.numVars)]
 
     def _has_negative_b(self):
         return np.any(self.tableau[:, -1] < 0)
@@ -167,7 +185,7 @@ class SimplexSolver:
 
     def _get_cadidates(self):
         # finds all negative entries on the valid top section
-        neg_idxs = np.where(self.tableau[0] < 0)[0]
+        neg_idxs = np.where(self.tableau[0] < 0 )[0]
         neg_idxs = neg_idxs[neg_idxs >= self.numRestr]
         return neg_idxs
 
@@ -213,7 +231,7 @@ class SimplexSolver:
     def _to_string(self, array):
         final = ""
         for num in array:
-            final += str(int(num)) + " "
+            final += str("{:.7f}".format(num)) + " "
         return final[:-1]
 
     def _print_results(self):
@@ -223,6 +241,6 @@ class SimplexSolver:
             print(self._to_string(self.optimal_solution))
             print(self._to_string(np.concatenate((self.tableau[0][:self.numRestr], np.zeros(self._excluded_restr_count))))) # certificade
         elif self.type == "ilimitada":
-            print("certificado")
+            print(self._to_string(self.optimal_solution))
         elif self.type == "inviavel":
             print(self._to_string(np.concatenate((self.tableau[0][:self.numRestr], np.zeros(self._excluded_restr_count))))) # certificade
